@@ -162,7 +162,17 @@ class OrderService
     public function setInvite(User $user):void
     {
         $order = $this->order;
-        if ($user->invite_user_id && ($order->total_amount <= 0)) return;
+        // 充值不是消费：充值单不产生佣金。原先充值也返佣，而钱仍留在用户自己
+        // 余额里、平台无收入，自邀请小号充值即可稳定套取充值额的固定比例。
+        if ($order->period === 'deposit' || (int)$order->type === 9) {
+            $order->invite_user_id = $user->invite_user_id;
+            return;
+        }
+        // 佣金基数取「套餐实际价值」= 网关实付 + 余额抵扣。setInvite 在余额抵扣之后
+        // 才被调用，若只看 total_amount，则「先充值再用余额买套餐」两头都拿不到佣金
+        // （充值已不返、套餐 total_amount 被抵扣成 0），邀请人颗粒无收。
+        $commissionBase = (int)$order->total_amount + (int)$order->balance_amount;
+        if ($user->invite_user_id && $commissionBase <= 0) return;
         $order->invite_user_id = $user->invite_user_id;
         $inviter = User::find($user->invite_user_id);
         if (!$inviter) return;
@@ -181,11 +191,12 @@ class OrderService
         }
 
         if (!$isCommission) return;
-        if ($inviter && $inviter->commission_rate) {
-            $order->commission_balance = $order->total_amount * ($inviter->commission_rate / 100);
-        } else {
-            $order->commission_balance = $order->total_amount * (config('v2board.invite_commission', 10) / 100);
-        }
+        // 整数化，避免浮点写入 int 列
+        $rate = ($inviter && $inviter->commission_rate)
+            ? (int)$inviter->commission_rate
+            : (int)config('v2board.invite_commission', 10);
+        $rate = max(0, min(100, $rate));
+        $order->commission_balance = intdiv($commissionBase * $rate, 100);
     }
 
     private function haveValidOrder(User $user)
