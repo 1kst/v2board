@@ -87,26 +87,37 @@ class OrderController extends Controller
             if ($amount >= 9999999 ) {
                 abort(500, __('Deposit amount too large, please contact the administrator'));
             }
-            $user = User::find($request->user['id']);
             DB::beginTransaction();
-            $order = new Order();
-            $orderService = new OrderService($order);
-            $order->user_id = $request->user['id'];
-            $order->plan_id = $request->input('plan_id');
-            $order->period = 'deposit';
-            $order->trade_no = Helper::generateOrderNo();
-            $order->total_amount = $amount;
-            
-            $orderService->setOrderType($user);
-            $orderService->setInvite($user);
+            try {
+                // 锁内复查唯一待支付订单，防并发创建多张。
+                $user = User::where('id', $request->user['id'])->lockForUpdate()->first();
+                if (!$user) {
+                    abort(500, __('The user does not exist'));
+                }
+                if ($userService->isNotCompleteOrderByUserId($request->user['id'])) {
+                    abort(500, __('You have an unpaid or pending order, please try again later or cancel it'));
+                }
+                $order = new Order();
+                $orderService = new OrderService($order);
+                $order->user_id = $request->user['id'];
+                $order->plan_id = $request->input('plan_id');
+                $order->period = 'deposit';
+                $order->trade_no = Helper::generateOrderNo();
+                $order->total_amount = $amount;
 
-            if (!$order->save()) {
-                DB::rollback();
-                abort(500, __('Failed to create order'));
+                $orderService->setOrderType($user);
+                $orderService->setInvite($user);
+
+                if (!$order->save()) {
+                    abort(500, __('Failed to create order'));
+                }
+
+                DB::commit();
+            } catch (\Throwable $e) {
+                DB::rollBack();
+                throw $e;
             }
-    
-            DB::commit();
-    
+
             return response([
                 'data' => $order->trade_no
             ]);
@@ -150,54 +161,65 @@ class OrderController extends Controller
         }
 
         DB::beginTransaction();
-        $order = new Order();
-        $orderService = new OrderService($order);
-        $order->user_id = $request->user['id'];
-        $order->plan_id = $plan->id;
-        $order->period = $request->input('period');
-        $order->trade_no = Helper::generateOrderNo();
-        $order->total_amount = $plan[$request->input('period')];
-
-        if ($request->input('coupon_code')) {
-            $couponService = new CouponService($request->input('coupon_code'));
-            if (!$couponService->use($order)) {
-                DB::rollBack();
-                abort(500, __('Coupon failed'));
+        try {
+            // 事务内锁定用户行并复查「唯一待支付订单」：把下单做成每用户串行的
+            // 临界区，堵住并发创建多张待支付订单的 TOCTOU；余额也改用锁内新鲜值，
+            // 避免事务外旧快照导致的扣款被覆盖。
+            $user = User::where('id', $request->user['id'])->lockForUpdate()->first();
+            if (!$user) {
+                abort(500, __('The user does not exist'));
             }
-            $order->coupon_id = $couponService->getId();
-        }
-
-        $orderService->setVipDiscount($user);
-        $orderService->setOrderType($user);
-
-        if ($user->balance > 0 && $order->total_amount > 0) {
-            $remainingBalance = $user->balance - $order->total_amount;
-            $userService = new UserService();
-            if ($remainingBalance > 0) {
-                if (!$userService->addBalance($order->user_id, - $order->total_amount)) {
-                    DB::rollBack();
-                    abort(500, __('Insufficient balance'));
-                }
-                $order->balance_amount = $order->total_amount;
-                $order->total_amount = 0;
-            } else {
-                if (!$userService->addBalance($order->user_id, - $user->balance)) {
-                    DB::rollBack();
-                    abort(500, __('Insufficient balance'));
-                }
-                $order->balance_amount = $user->balance;
-                $order->total_amount -= $user->balance;
+            if ($userService->isNotCompleteOrderByUserId($request->user['id'])) {
+                abort(500, __('You have an unpaid or pending order, please try again later or cancel it'));
             }
+
+            $order = new Order();
+            $orderService = new OrderService($order);
+            $order->user_id = $request->user['id'];
+            $order->plan_id = $plan->id;
+            $order->period = $request->input('period');
+            $order->trade_no = Helper::generateOrderNo();
+            $order->total_amount = $plan[$request->input('period')];
+
+            if ($request->input('coupon_code')) {
+                $couponService = new CouponService($request->input('coupon_code'));
+                if (!$couponService->use($order)) {
+                    abort(500, __('Coupon failed'));
+                }
+                $order->coupon_id = $couponService->getId();
+            }
+
+            $orderService->setVipDiscount($user);
+            $orderService->setOrderType($user);
+
+            if ($user->balance > 0 && $order->total_amount > 0) {
+                $remainingBalance = $user->balance - $order->total_amount;
+                if ($remainingBalance > 0) {
+                    if (!$userService->addBalance($order->user_id, - $order->total_amount)) {
+                        abort(500, __('Insufficient balance'));
+                    }
+                    $order->balance_amount = $order->total_amount;
+                    $order->total_amount = 0;
+                } else {
+                    if (!$userService->addBalance($order->user_id, - $user->balance)) {
+                        abort(500, __('Insufficient balance'));
+                    }
+                    $order->balance_amount = $user->balance;
+                    $order->total_amount -= $user->balance;
+                }
+            }
+
+            $orderService->setInvite($user);
+
+            if (!$order->save()) {
+                abort(500, __('Failed to create order'));
+            }
+
+            DB::commit();
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            throw $e;
         }
-
-        $orderService->setInvite($user);
-
-        if (!$order->save()) {
-            DB::rollback();
-            abort(500, __('Failed to create order'));
-        }
-
-        DB::commit();
 
         return response([
             'data' => $order->trade_no
@@ -216,7 +238,17 @@ class OrderController extends Controller
             abort(500, __('Order does not exist or has been paid'));
         }
         // free process
-        if ($order->total_amount <= 0) {
+        if ((int)$order->total_amount <= 0) {
+            // 负数一律拒绝：正常减免不会算出负的应付金额，出现负数说明折扣/折抵
+            // 计算被做穿，绝不能当免费单开通。
+            if ((int)$order->total_amount < 0) {
+                info('ORDER_AMOUNT_NEGATIVE', $order->toArray());
+                abort(500, __('Order amount is invalid, please contact support'));
+            }
+            // 充值单必须真实付款，不能走零元免费分支。
+            if ((int)$order->type === 9) {
+                abort(500, __('Deposit order must be paid'));
+            }
             $orderService = new OrderService($order);
             if (!$orderService->paid($order->trade_no)) abort(500, '');
             return response([
@@ -302,7 +334,7 @@ class OrderController extends Controller
         if (!$order) {
             abort(500, __('Order does not exist'));
         }
-        if ($order->status !== 0) {
+        if ((int)$order->status !== 0) {
             abort(500, __('You can only cancel pending orders'));
         }
         $orderService = new OrderService($order);

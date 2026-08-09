@@ -77,6 +77,8 @@ class CheckRenewal extends Command
                         throw new Exception('No enough balance');
                     }
 
+                    $price = (int)$plan[$latestPeriod];
+                    $newExpired = $this->getTime($latestPeriod, $user->expired_at);
                     DB::beginTransaction();
                     $order = new Order();
                     $orderService = new OrderService($order);
@@ -84,29 +86,40 @@ class CheckRenewal extends Command
                     $order->plan_id = $plan->id;
                     $order->period = $latestPeriod;
                     $order->trade_no = Helper::generateOrderNo();
-                    $order->balance_amount = $plan[$latestPeriod];
+                    $order->balance_amount = $price;
                     $order->total_amount = 0;
                     $orderService->setVipDiscount($user);
                     $order->type = 2;
-                    
-                    $user->balance = $user->balance - $plan[$latestPeriod];
-                    $user->expired_at = $this->getTime($latestPeriod, $user->expired_at);
-                    if (!$user->save()) {
-                        DB::rollback();
-                        throw new Exception('自动续费失败');
+
+                    // 原子扣款 + 续期：余额不足则 affected=0；不再用可能陈旧的
+                    // $user 快照写绝对值，避免覆盖并发扣款。
+                    $affected = User::where('id', $user->id)
+                        ->where('balance', '>=', $price)
+                        ->update([
+                            'balance' => DB::raw('balance - ' . $price),
+                            'expired_at' => $newExpired,
+                            'updated_at' => time(),
+                        ]);
+                    if ($affected !== 1) {
+                        throw new Exception('No enough balance');
                     }
                     $order->status = 3;
                     if (!$order->save()) {
-                        DB::rollback();
                         throw new Exception('自动续费失败');
                     }
                     DB::commit();
                     //$mailService->remindAutorenewal($user);
-                } catch (\Exception $e) {
-                    $user->auto_renewal = 0;
-                    if(!$user->save()){
-                        info('用户自动续费失败,调整设置失败', [$e->getMessage() , $user]);
-                    };
+                } catch (\Throwable $e) {
+                    // 只在有活动事务时回滚，且绝不 save() 内存里的 $user（它可能带着
+                    // 已被回滚的余额/到期改动，save 会让扣款凭空生效）。
+                    if (DB::transactionLevel() > 0) {
+                        DB::rollBack();
+                    }
+                    User::where('id', $user->id)->update([
+                        'auto_renewal' => 0,
+                        'updated_at' => time(),
+                    ]);
+                    info('用户自动续费失败', [$e->getMessage(), $user->id]);
                 }
             }
         }

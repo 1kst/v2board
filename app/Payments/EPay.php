@@ -77,9 +77,25 @@ class EPay {
             return('fail');
         }
 
+        // 商户号绑定：签名只证明参数由持密钥方生成，仍需确认是本站商户号。
+        if (isset($this->config['pid']) &&
+            !hash_equals((string)$this->config['pid'], (string)($params['pid'] ?? ''))) {
+            return false;
+        }
+
+        // 回传实收金额（元→分，字符串解析禁用浮点，(float)"12.10"*100 在部分平台得 1209）。
+        // 交给控制器与订单应付金额比对。
+        $money = trim((string)($params['money'] ?? ''));
+        $amount = null;
+        if (preg_match('/^\d{1,9}(\.\d{1,2})?$/', $money)) {
+            [$yuan, $cent] = array_pad(explode('.', $money, 2), 2, '0');
+            $amount = (int)$yuan * 100 + (int)str_pad(substr($cent, 0, 2), 2, '0');
+        }
+
         return [
             'trade_no' => $params['out_trade_no'],
-            'callback_no' => $params['trade_no']
+            'callback_no' => $params['trade_no'],
+            'total_amount' => $amount,
         ];
     }
 }

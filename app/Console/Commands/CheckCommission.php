@@ -96,14 +96,11 @@ class CheckCommission extends Command
             $inviter = User::find($inviteUserId);
             if (!$inviter) continue;
             if (!isset($commissionShareLevels[$l])) continue;
-            $commissionBalance = $order->commission_balance * ($commissionShareLevels[$l] / 100);
+            $commissionBalance = intdiv((int)$order->commission_balance * (int)$commissionShareLevels[$l], 100);
             if (!$commissionBalance) continue;
-            if ((int)config('v2board.withdraw_close_enable', 0)) {
-                $inviter->balance = $inviter->balance + $commissionBalance;
-            } else {
-                $inviter->commission_balance = $inviter->commission_balance + $commissionBalance;
-            }
-            if (!$inviter->save()) {
+            // 原子增量而非「读快照 + 写绝对值」，避免覆盖并发的带锁扣款。
+            $field = (int)config('v2board.withdraw_close_enable', 0) ? 'balance' : 'commission_balance';
+            if (User::where('id', $inviter->id)->increment($field, $commissionBalance, ['updated_at' => time()]) !== 1) {
                 DB::rollBack();
                 return false;
             }

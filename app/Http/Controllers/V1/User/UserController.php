@@ -159,13 +159,20 @@ class UserController extends Controller
         DB::beginTransaction();
 
         try {
-            $user = User::find($request->user['id']);
+            $giftcard_input = $request->giftcard;
+            // 先按 code 取主键（code 无索引，直接 FOR UPDATE 会全表扫描并锁全表），
+            // 再按主键 lockForUpdate 锁定并在锁内重读。这样并发兑换同一张卡会串行化，
+            // used_user_ids / limit_use 的「先读后判再写」不再能被并发绕过。
+            $giftcardId = Giftcard::where('code', $giftcard_input)->value('id');
+            if (!$giftcardId) {
+                abort(500, __('The gift card does not exist'));
+            }
+            $giftcard = Giftcard::where('id', $giftcardId)->lockForUpdate()->first();
+            // 用户行也在同一事务内加锁，配额与余额的读-改-写在锁保护下进行。
+            $user = User::where('id', $request->user['id'])->lockForUpdate()->first();
             if (!$user) {
                 abort(500, __('The user does not exist'));
             }
-            $giftcard_input = $request->giftcard;
-            $giftcard = Giftcard::where('code', $giftcard_input)->first();
-
             if (!$giftcard) {
                 abort(500, __('The gift card does not exist'));
             }
@@ -409,37 +416,47 @@ class UserController extends Controller
 
     public function transfer(UserTransfer $request)
     {
-        $user = User::find($request->user['id']);
-        if (!$user) {
-            abort(500, __('The user does not exist'));
+        $userId = (int)$request->user['id'];
+        $amount = (int)$request->input('transfer_amount');
+        if ($amount <= 0) {
+            abort(500, __('The transfer amount parameter is wrong'));
         }
-        if ($request->input('transfer_amount') > $user->commission_balance) {
-            abort(500, __('Insufficient commission balance'));
-        }
-        DB::beginTransaction();
-        $order = new Order();
-        $orderService = new OrderService($order);
-        $order->user_id = $request->user['id'];
-        $order->plan_id = 0;
-        $order->period = 'deposit';
-        $order->trade_no = Helper::generateOrderNo();
-        $order->total_amount = $request->input('transfer_amount');
+        $tradeNo = Helper::generateOrderNo();
 
-        $orderService->setOrderType($user);
-        $orderService->setInvite($user);
+        // 闭包事务：内部任何 abort/异常都会自动回滚（Laravel 8 语义），不必手写
+        // rollBack，避免「先 rollBack 再 abort」被外层二次回滚。
+        DB::transaction(function () use ($userId, $amount, $tradeNo) {
+            // 扣佣金 + 加余额折进一条带前置条件的原子 UPDATE：affected 即门禁。
+            // 原写法在事务外读旧余额快照、事务内写绝对值，会覆盖并发的带锁扣款
+            // （下单 addBalance(-P) 被抹掉），1 分佣金即可套出任意价位订阅。
+            $affected = User::where('id', $userId)
+                ->where('commission_balance', '>=', $amount)
+                ->update([
+                    'commission_balance' => DB::raw('commission_balance - ' . $amount),
+                    'balance' => DB::raw('balance + ' . $amount),
+                    'updated_at' => time(),
+                ]);
+            if ($affected !== 1) {
+                abort(500, __('Insufficient commission balance'));
+            }
 
-        $user->commission_balance = $user->commission_balance - $request->input('transfer_amount');
-        $user->balance = $user->balance + $request->input('transfer_amount');
-        $order->status = 3;
-        $order->total_amount = 0;
-        $order->surplus_amount = $request->input('transfer_amount');
-        $order->callback_no = '佣金划转 Commission transfer';
-        if (!$order->save()||!$user->save()) {
-            DB::rollback();
-            abort(500, __('Transfer failed'));
-        }
-
-        DB::commit();
+            // 记账订单。划转不是消费，绝不能走 setInvite()：原代码在把
+            // total_amount 置 0 之前调用 setInvite，会按划转额凭空铸出一笔返佣，
+            // A/B 互为邀请人时可循环套取。这里直接写 type=9（等价 deposit）。
+            $order = new Order();
+            $order->user_id = $userId;
+            $order->plan_id = 0;
+            $order->period = 'deposit';
+            $order->type = 9;
+            $order->trade_no = $tradeNo;
+            $order->total_amount = 0;
+            $order->surplus_amount = $amount;
+            $order->status = 3;
+            $order->callback_no = '佣金划转 Commission transfer';
+            if (!$order->save()) {
+                abort(500, __('Transfer failed'));
+            }
+        });
 
         return response([
             'data' => true

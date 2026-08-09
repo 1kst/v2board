@@ -28,14 +28,19 @@ class CouponService
         $this->check();
         switch ($this->coupon->type) {
             case 1:
-                $order->discount_amount = $this->coupon->value;
+                $order->discount_amount = max(0, (int)$this->coupon->value);
                 break;
             case 2:
-                $order->discount_amount = $order->total_amount * ($this->coupon->value / 100);
+                // 整数化，避免浮点写入 int 列；百分比夹到 [0,100]
+                $rate = max(0, min(100, (int)$this->coupon->value));
+                $order->discount_amount = intdiv((int)$order->total_amount * $rate, 100);
                 break;
         }
         if ($order->discount_amount > $order->total_amount) {
             $order->discount_amount = $order->total_amount;
+        }
+        if ($order->discount_amount < 0) {
+            $order->discount_amount = 0;
         }
         if ($this->coupon->limit_use !== NULL) {
             if ($this->coupon->limit_use <= 0) return false;

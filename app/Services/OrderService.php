@@ -6,6 +6,7 @@ use App\Jobs\OrderHandleJob;
 use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
+use App\Services\TelegramService;
 use Illuminate\Support\Facades\DB;
 
 class OrderService
@@ -28,77 +29,87 @@ class OrderService
 
     public function open()
     {
-        $order = $this->order;
-        $this->user = User::find($order->user_id);
-        if ($order->type == 9) {
-            DB::beginTransaction();
-            $this->user->balance += $order->total_amount + $this->getbounus($order->total_amount);
-
-            if (!$this->user->save()) {
+        $orderId = $this->order->id;
+        DB::beginTransaction();
+        try {
+            // 事务内加锁重读并复查状态：CheckOrder 每分钟重派 + 回调派发 + 多进程
+            // worker 可能让同一订单被两个 job 并发处理，重复 open() 会二次延长订阅、
+            // 二次充值入账。加锁重读把第二个 job 的 status 判断变成当前读，直接幂等退出。
+            // 加锁顺序固定 order → user，与 cancel() 一致，避免死锁。
+            $order = Order::where('id', $orderId)->lockForUpdate()->first();
+            if (!$order || (int)$order->status !== 1) {
                 DB::rollBack();
-                abort(500, '充值失败');
+                return;                              // 幂等退出，不是错误
             }
-            $order->status = 3;
-            if (!$order->save()) {
-                DB::rollBack();
-                abort(500, '充值失败');
+            $user = User::where('id', $order->user_id)->lockForUpdate()->first();
+            if (!$user) {
+                throw new \Exception('open order failed: ' . $order->trade_no);
+            }
+            $this->order = $order;
+            $this->user = $user;
+
+            if ((int)$order->type === 9) {
+                // 余额用原子增量而非绝对值写回：即使别处仍有未收口的余额写入并发，
+                // 也不会把这笔充值覆盖掉。
+                $delta = $order->total_amount + $this->getbounus($order->total_amount);
+                User::where('id', $user->id)->increment('balance', $delta, ['updated_at' => time()]);
+            } else {
+                $plan = Plan::find($order->plan_id);
+                if (!$plan) {
+                    throw new \Exception('open order failed: ' . $order->trade_no);
+                }
+                // 花钱这一行立不变量：refund 不得为负、不得超过本单剩余价值。
+                // 上游任何一次金额算术回退都不再能在这里变现。
+                $refund = min(max(0, (int)$order->refund_amount), max(0, (int)$order->surplus_amount));
+                if ($refund > 0) {
+                    User::where('id', $user->id)->increment('balance', $refund, ['updated_at' => time()]);
+                }
+                if ($order->surplus_order_ids) {
+                    // 只折抵仍处于已完成态的订单，避免把已折抵过的再改一次。
+                    Order::whereIn('id', $order->surplus_order_ids)
+                        ->where('status', 3)
+                        ->update(['status' => 4]);
+                }
+                switch ((string)$order->period) {
+                    case 'onetime_price':
+                        $this->buyByOneTime($order, $plan);
+                        break;
+                    case 'reset_price':
+                        $this->buyByResetTraffic();
+                        break;
+                    default:
+                        $this->buyByPeriod($order, $plan);
+                }
+                switch ((int)$order->type) {
+                    case 1:
+                        $this->openEvent(config('v2board.new_order_event_id', 0));
+                        break;
+                    case 2:
+                        $this->openEvent(config('v2board.renew_order_event_id', 0));
+                        break;
+                    case 3:
+                        $this->openEvent(config('v2board.change_order_event_id', 0));
+                        break;
+                }
+                $this->setSpeedLimit($plan->speed_limit);
+                // buyBy* / setSpeedLimit 改写的是加锁重读出来的 $this->user 的
+                // plan_id / expired_at / u / d / transfer_enable / speed_limit 等
+                // 订阅字段（非 balance），保存无并发覆盖问题。
+                if (!$user->save()) {
+                    throw new \Exception('open order failed: ' . $order->trade_no);
+                }
+            }
+
+            // 最终状态迁移用带前置条件的原子更新兜底；持锁前提下必然 affected=1。
+            if (Order::where('id', $order->id)->where('status', 1)
+                    ->update(['status' => 3, 'updated_at' => time()]) !== 1) {
+                throw new \Exception('open order failed: ' . $order->trade_no);
             }
             DB::commit();
-            return;
-        }
-
-        $plan = Plan::find($order->plan_id);
-
-        if ($order->refund_amount) {
-            $this->user->balance = $this->user->balance + $order->refund_amount;
-        }
-        DB::beginTransaction();
-        if ($order->surplus_order_ids) {
-            try {
-                Order::whereIn('id', $order->surplus_order_ids)->update([
-                    'status' => 4
-                ]);
-            } catch (\Exception $e) {
-                DB::rollback();
-                abort(500, '开通失败');
-            }
-        }
-        switch ((string)$order->period) {
-            case 'onetime_price':
-                $this->buyByOneTime($order, $plan);
-                break;
-            case 'reset_price':
-                $this->buyByResetTraffic();
-                break;
-            default:
-                $this->buyByPeriod($order, $plan);
-        }
-
-        switch ((int)$order->type) {
-            case 1:
-                $this->openEvent(config('v2board.new_order_event_id', 0));
-                break;
-            case 2:
-                $this->openEvent(config('v2board.renew_order_event_id', 0));
-                break;
-            case 3:
-                $this->openEvent(config('v2board.change_order_event_id', 0));
-                break;
-        }
-
-        $this->setSpeedLimit($plan->speed_limit);
-
-        if (!$this->user->save()) {
+        } catch (\Throwable $e) {
             DB::rollBack();
-            abort(500, '开通失败');
+            throw $e;
         }
-        $order->status = 3;
-        if (!$order->save()) {
-            DB::rollBack();
-            abort(500, '开通失败');
-        }
-
-        DB::commit();
     }
 
 
@@ -113,11 +124,17 @@ class OrderService
             if (!(int)config('v2board.plan_change_enable', 1)) abort(500, '目前不允许更改订阅，请联系客服或提交工单操作');
             $order->type = 3;
             if ((int)config('v2board.surplus_enable', 1)) $this->getSurplusValue($user, $order);
-            if ($order->surplus_amount >= $order->total_amount) {
-                $order->refund_amount = $order->surplus_amount - $order->total_amount;
+            // 负数兜底：surplus / total 都夹到非负，避免折抵算出负的 total_amount
+            // 一路活到 checkout 的免费分支变现。
+            $surplus = max(0, (int)$order->surplus_amount);
+            $total = max(0, (int)$order->total_amount);
+            $order->surplus_amount = $surplus;
+            if ($surplus >= $total) {
+                $order->refund_amount = $surplus - $total;
                 $order->total_amount = 0;
             } else {
-                $order->total_amount = $order->total_amount - $order->surplus_amount;
+                $order->refund_amount = 0;
+                $order->total_amount = $total - $surplus;
             }
         } else if ($user->expired_at > time() && $order->plan_id == $user->plan_id) { // 用户订阅未过期且购买订阅与当前订阅相同 === 续费
             $order->type = 2;
@@ -129,10 +146,17 @@ class OrderService
     public function setVipDiscount(User $user)
     {
         $order = $this->order;
+        // 整数化 + 折扣合计硬夹到 [0, 原价]：VIP 折扣与优惠券折扣此前各按原价
+        // 计算再累加，两者叠加可让 discount 超过原价，total_amount 变负。
+        $gross = max(0, (int)$order->total_amount);      // 此刻仍是套餐原价
+        $discount = max(0, (int)$order->discount_amount); // CouponService 已先夹到 [0, gross]
         if ($user->discount) {
-            $order->discount_amount = $order->discount_amount + ($order->total_amount * ($user->discount / 100));
+            $rate = max(0, min(100, (int)$user->discount));
+            $discount += intdiv($gross * $rate, 100);
         }
-        $order->total_amount = $order->total_amount - $order->discount_amount;
+        $discount = max(0, min($discount, $gross));
+        $order->discount_amount = $discount;
+        $order->total_amount = $gross - $discount;        // 恒 >= 0
     }
 
     public function setInvite(User $user):void
@@ -257,14 +281,49 @@ class OrderService
     public function paid(string $callbackNo)
     {
         $order = $this->order;
-        if ($order->status !== 0) return true;
-        $order->status = 1;
-        $order->paid_at = time();
-        $order->callback_no = $callbackNo;
-        if (!$order->save()) return false;
+        if ((int)$order->status !== 0) return true;      // 快路径，仅作优化
+
+        // 带前置条件的原子迁移（CAS）：并发/重放的回调里只有一个能把 status
+        // 从 0 迁到 1，其余 affected=0。这同时和 cancel() 争抢同一个
+        // `status = 0` 前置条件，堵住「checkout 与 cancel 交叉 → 白拿订阅并退款」。
+        $affected = Order::where('id', $order->id)
+            ->where('status', 0)
+            ->update([
+                'status' => 1,
+                'paid_at' => time(),
+                'callback_no' => $callbackNo,
+            ]);
+
+        if ($affected !== 1) {
+            // 状态已被并发/重放迁走。对支付网关必须幂等返回成功，否则会被无限重试。
+            $current = (int)Order::where('id', $order->id)->value('status');
+            if ($current === 2) {
+                // 订单已取消却又收到真实付款：钱已收、余额已退，必须人工介入。
+                info('order paid after cancel', [
+                    'trade_no' => $order->trade_no,
+                    'callback_no' => $callbackNo,
+                ]);
+                try {
+                    (new TelegramService())->sendMessageWithAdmin(sprintf(
+                        "⚠️ 订单已取消但收到支付回调，请人工处理\n订单号：%s\n回调号：%s",
+                        $order->trade_no,
+                        $callbackNo
+                    ));
+                } catch (\Throwable $e) {
+                    // 告警失败不能把幂等成功变成 500，否则网关会继续重试。
+                    info('notify admin failed: ' . $e->getMessage());
+                }
+            }
+            return true;
+        }
+
+        $order->setAttribute('status', 1);
+        $order->syncOriginalAttribute('status');
+
         try {
             OrderHandleJob::dispatch($order->trade_no);
         } catch (\Exception $e) {
+            // 状态已是 1，CheckOrder 每分钟兜底会重新派发。
             return false;
         }
         return true;
@@ -274,19 +333,33 @@ class OrderService
     {
         $order = $this->order;
         DB::beginTransaction();
-        $order->status = 2;
-        if (!$order->save()) {
-            DB::rollBack();
-            return false;
-        }
-        if ($order->balance_amount) {
-            $userService = new UserService();
-            if (!$userService->addBalance($order->user_id, $order->balance_amount)) {
+        try {
+            // 带前置条件的原子迁移（CAS）：并发取消里只有把 status 从 0 改成 2 的
+            // 那一个请求拿到 affected=1，其余 affected=0 直接退出、不退款。
+            // 原写法 $order->save() 只生成 where id=?，Eloquent 按加载时的旧值
+            // 判脏，每个并发请求都会发出 UPDATE 并各自退一次款。
+            $affected = Order::where('id', $order->id)
+                ->where('status', 0)
+                ->update(['status' => 2]);
+            if ($affected !== 1) {
                 DB::rollBack();
                 return false;
             }
+            if ($order->balance_amount) {
+                $userService = new UserService();
+                if (!$userService->addBalance($order->user_id, $order->balance_amount)) {
+                    DB::rollBack();
+                    return false;
+                }
+            }
+            DB::commit();
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return false;
         }
-        DB::commit();
+        // 让内存模型与库一致，避免调用方随后再 save() 把 status 写回旧值。
+        $order->setAttribute('status', 2);
+        $order->syncOriginalAttribute('status');
         return true;
     }
 
