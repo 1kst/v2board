@@ -76,9 +76,15 @@ class WechatPayNative {
             return('FAIL');
         }
 
+        // 回传实收金额（微信 total_fee 单位为分），交由控制器与订单应付金额比对
+        $amount = null;
+        if (isset($data['total_fee']) && preg_match('/^\d{1,10}$/', (string)$data['total_fee'])) {
+            $amount = (int)$data['total_fee'];
+        }
         return [
             'trade_no' => $data['out_trade_no'],
-            'callback_no' => $data['transaction_id']
+            'callback_no' => $data['transaction_id'],
+            'total_amount' => $amount,
         ];
     }
 }

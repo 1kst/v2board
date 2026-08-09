@@ -73,9 +73,18 @@ class AlipayF2F {
                 /**
                  * Payment is successful
                  */
+                // 回传实收金额：支付宝 total_amount 单位为元，用字符串切分转分，
+                // 禁用浮点（(int)((float)"12.10"*100) 在部分平台得 1209）。
+                $amount = null;
+                $money = trim((string)($params['total_amount'] ?? ''));
+                if (preg_match('/^\d{1,9}(\.\d{1,2})?$/', $money)) {
+                    [$yuan, $cent] = array_pad(explode('.', $money, 2), 2, '0');
+                    $amount = (int)$yuan * 100 + (int)str_pad(substr($cent, 0, 2), 2, '0');
+                }
                 return [
                     'trade_no' => $params['out_trade_no'],
-                    'callback_no' => $params['trade_no']
+                    'callback_no' => $params['trade_no'],
+                    'total_amount' => $amount,
                 ];
             } else {
                 /**

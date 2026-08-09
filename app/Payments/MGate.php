@@ -95,9 +95,15 @@ class MGate {
         if (!hash_equals($generateSignature, $sign)) {
             return false;
         }
+        // 回传实收金额（MGate 与下单同用「分」为单位），交由控制器与订单应付金额比对
+        $amount = null;
+        if (isset($params['total_amount']) && preg_match('/^\d{1,10}$/', (string)$params['total_amount'])) {
+            $amount = (int)$params['total_amount'];
+        }
         return [
             'trade_no' => $params['out_trade_no'],
-            'callback_no' => $params['trade_no']
+            'callback_no' => $params['trade_no'],
+            'total_amount' => $amount,
         ];
     }
 }
