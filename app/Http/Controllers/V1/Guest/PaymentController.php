@@ -39,18 +39,23 @@ class PaymentController extends Controller
         }
         if ((int)$order->status !== 0) return true;
 
-        // 回调对应的支付配置必须与下单时 checkout 绑定的 payment_id 一致。
-        // checkout 必然写入 payment_id 后才跳转网关，因此合法回调时它一定非空；
-        // 为空说明该单没走过网关 checkout（伪造/重放），拒绝。
-        if ($paymentId !== null) {
-            if ($order->payment_id === null || (int)$order->payment_id !== (int)$paymentId) {
-                info('payment notify payment_id mismatch', [
-                    'trade_no' => $tradeNo,
-                    'order_payment_id' => $order->payment_id,
-                    'notify_payment_id' => $paymentId,
-                ]);
-                abort(500, 'payment mismatch');
-            }
+        // 订单 payment_id 为空 = 从未经 checkout 绑定过任何网关（伪造/重放该单），拒绝。
+        if ($paymentId !== null && $order->payment_id === null) {
+            info('payment notify on unbound order', [
+                'trade_no' => $tradeNo, 'notify_payment_id' => $paymentId,
+            ]);
+            abort(500, 'payment mismatch');
+        }
+        // 非空但与本次回调配置不一致：用户可能在付款窗口内切换过支付方式，旧方式的
+        // 合法回调仍会到达。此时不能直接拒（否则钱已收、订单永不开通），记日志后交由
+        // 下面的金额校验兜底。跨网关伪造已被 PaymentService 的 method↔配置绑定 + 各
+        // 网关签名挡在更前面，这里放宽不会打开伪造缺口。
+        if ($paymentId !== null && (int)$order->payment_id !== (int)$paymentId) {
+            info('payment notify payment_id switched', [
+                'trade_no' => $tradeNo,
+                'order_payment_id' => $order->payment_id,
+                'notify_payment_id' => $paymentId,
+            ]);
         }
 
         // 金额绑定：网关回传实收金额（分）时，必须 >= 订单应付（总额 + 手续费）。

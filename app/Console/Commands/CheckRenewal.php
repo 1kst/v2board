@@ -78,6 +78,11 @@ class CheckRenewal extends Command
                     }
 
                     $price = (int)$plan[$latestPeriod];
+                    // 周期价缺失(null→0)或非正时跳过：否则原子扣款的 balance>=0 恒成立，
+                    // 会给该用户免费续期（例如管理员下架了某周期价后仍有人自动续费）。
+                    if ($price <= 0) {
+                        throw new Exception('周期价缺失或非正，跳过自动续费');
+                    }
                     $newExpired = $this->getTime($latestPeriod, $user->expired_at);
                     DB::beginTransaction();
                     $order = new Order();

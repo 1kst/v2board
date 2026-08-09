@@ -65,13 +65,18 @@ class CheckCommission extends Command
             ->get();
         foreach ($orders as $order) {
             DB::beginTransaction();
-            if (!$this->payHandle($order->invite_user_id, $order)) {
+            // 先用带前置条件的原子更新抢占 1→2 领取权：两个 overlap 运行的实例里
+            // 只有 affected=1 的那个才继续派佣，另一个 affected=0 直接跳过，
+            // 关闭「调度未加 withoutOverlapping 时确定性重复返佣」。
+            $claimed = Order::where('id', $order->id)
+                ->where('commission_status', 1)
+                ->update(['commission_status' => 2]);
+            if ($claimed !== 1) {
                 DB::rollBack();
                 continue;
             }
-            $order->commission_status = 2;
-            if (!$order->save()) {
-                DB::rollBack();
+            if (!$this->payHandle($order->invite_user_id, $order)) {
+                DB::rollBack();          // 派佣失败则回滚，commission_status 退回 1，下轮重试
                 continue;
             }
             DB::commit();
