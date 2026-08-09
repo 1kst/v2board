@@ -14,9 +14,9 @@ use App\Services\AuthService;
 use App\Utils\CacheKey;
 use App\Utils\Dict;
 use App\Utils\Helper;
+use App\Utils\TurnstileVerifier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
-use ReCaptcha\ReCaptcha;
 
 class AuthController extends Controller
 {
@@ -30,10 +30,15 @@ class AuthController extends Controller
                 ]));
             }
         }
-        if ((int)config('v2board.recaptcha_enable', 0)) {
-            $recaptcha = new ReCaptcha(config('v2board.recaptcha_key'));
-            $recaptchaResp = $recaptcha->verify($request->input('recaptcha_data'));
-            if (!$recaptchaResp->isSuccess()) {
+        // A human-check token is single-use, and the app solves one for the
+        // verification-code request and reuses it here rather than putting the
+        // user through a second challenge — re-checking it would always fail
+        // as already-redeemed. Registration is gated by that email code, so
+        // the check only has to run here when email verification is off and
+        // this is the sole bot barrier left.
+        if ((int)config('v2board.recaptcha_enable', 0)
+            && !(int)config('v2board.email_verify', 0)) {
+            if (!TurnstileVerifier::verify($request->input('recaptcha_data'))) {
                 abort(500, __('Invalid code is incorrect'));
             }
         }
