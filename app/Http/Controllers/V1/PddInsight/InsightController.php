@@ -12,8 +12,8 @@ use Illuminate\Support\Facades\Schema;
  *
  * 设计约束：
  * - 严格只读，不写任何表。
- * - 最小权限：只输出流量口径与节点 host/port，绝不输出明文 token / email /
- *   密码 salt / 支付 / 邀请关系 / 工单 / 备注 / 节点凭据(UUID、密钥、server_key)。
+ * - 最小权限：只输出流量口径、用户主键 id 与节点 host/port，绝不输出明文 token /
+ *   email / 密码 salt / 支付 / 邀请关系 / 工单 / 备注 / 节点凭据(UUID、密钥、server_key)。
  * - 用户关联键是 th = hash('sha256', trim($token))，与 pdd-api 侧日志一致。
  *   刻意在 PHP 内计算而非用 MySQL SHA2()/TRIM()：MySQL 的 TRIM() 只去空格，
  *   PHP trim() 还会去 \t\n\r\0\x0B，两者对异常 token 会给出不同结果。
@@ -114,6 +114,9 @@ class InsightController extends Controller
             $userId = (int)$user->id;
             $data[] = [
                 'th' => hash('sha256', trim((string)$user->token)),
+                // uid = v2_user.id（主键，恒有值）。给风控后台定位到具体用户用，
+                // 纯数字、不含个人信息；邮箱等敏感字段仍然不输出。
+                'uid' => $userId,
                 'lt_u' => isset($lifetime[$userId]) ? $lifetime[$userId]['u'] : 0,
                 'lt_d' => isset($lifetime[$userId]) ? $lifetime[$userId]['d'] : 0,
                 'cur_u' => (int)$user->u,
