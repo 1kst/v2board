@@ -11,57 +11,32 @@ class PaymentService
     protected $class;
     protected $config;
     protected $payment;
-    protected $storedPayment;
 
     public function __construct($method, $id = NULL, $uuid = NULL)
     {
-        // method 来自回调 URL，先做字符集约束，杜绝借类名做路径/命名空间穿越。
-        if (!preg_match('/^[A-Za-z0-9]+$/', (string)$method)) abort(404, 'gate is not found');
         $this->method = $method;
         $this->class = '\\App\\Payments\\' . $this->method;
-        if (!class_exists($this->class)) abort(404, 'gate is not found');
-
-        $paymentModel = null;
-        if ($uuid) {
-            $paymentModel = Payment::where('uuid', $uuid)->first();
-        } elseif ($id) {
-            $paymentModel = Payment::find($id);
-        }
-        // 原代码对 first()/find() 直接 ->toArray()，查不到会 fatal（null->toArray）。
-        if (($id || $uuid) && !$paymentModel) abort(404, 'gate is not found');
-
+        if (!class_exists($this->class)) abort(500, 'gate is not found');
+        if ($id) $payment = Payment::find($id)->toArray();
+        if ($uuid) $payment = Payment::where('uuid', $uuid)->first()->toArray();
         $this->config = [];
-        if ($paymentModel) {
-            $payment = $paymentModel->toArray();
-            $this->storedPayment = $payment['payment'];   // 该配置实际存储的网关类型
+        if (isset($payment)) {
             $this->config = $payment['config'];
             $this->config['enable'] = $payment['enable'];
             $this->config['id'] = $payment['id'];
             $this->config['uuid'] = $payment['uuid'];
             $this->config['notify_domain'] = $payment['notify_domain'];
-        }
+        };
         $this->payment = new $this->class($this->config);
-    }
-
-    public function getPaymentId(): ?int
-    {
-        return isset($this->config['id']) ? (int)$this->config['id'] : null;
     }
 
     public function notify($params)
     {
         if (!$this->config['enable']) abort(500, 'gate is not enable');
-        // 关键绑定（仅回调路径）：URL 里的 method 必须等于该配置实际存储的网关类型。
-        // 否则攻击者可拿「已启用配置的 uuid」+「另一个在缺密钥时会 fail-open 的网关
-        // 类名」伪造回调，一个请求换一份订阅。放在 notify 而非构造函数，避免误伤
-        // admin 预览表单 / checkout 等复用同一构造函数的合法路径。
-        if ($this->storedPayment !== null && (string)$this->storedPayment !== (string)$this->method) {
-            abort(404, 'gate is not found');
-        }
         return $this->payment->notify($params);
     }
 
-    public function pay($order, $host)
+    public function pay($order)
     {
         // custom notify domain name
         $notifyUrl = url("/api/v1/guest/payment/notify/{$this->method}/{$this->config['uuid']}");
@@ -69,10 +44,15 @@ class PaymentService
             $parseUrl = parse_url($notifyUrl);
             $notifyUrl = $this->config['notify_domain'] . $parseUrl['path'];
         }
-
+        $currentBase = $this->currentBase();
+        if ($currentBase) { 
+            $returnUrl = $currentBase . '/#/order/' . $order['trade_no'];
+        } else {
+            $returnUrl = url('/#/order/' . $order['trade_no']);
+        }
         return $this->payment->pay([
             'notify_url' => $notifyUrl,
-            'return_url' => $host . '/#/payment?trade_no=' . $order['trade_no'],
+            'return_url' => $returnUrl,
             'trade_no' => $order['trade_no'],
             'total_amount' => $order['total_amount'],
             'user_id' => $order['user_id'],
@@ -88,5 +68,30 @@ class PaymentService
             if (isset($this->config[$key])) $form[$key]['value'] = $this->config[$key];
         }
         return $form;
+    }
+
+    private function currentBase()
+    {
+        $origin = request()->header('Origin');
+
+        if ($origin && preg_match('#^https?://[A-Za-z0-9.\-:\[\]]+$#i', $origin)) {
+            return rtrim($origin, '/');
+        }
+
+        $host = request()->header('X-Forwarded-Host')
+            ?: request()->header('X-Original-Host')
+            ?: request()->header('Host');
+
+        if ($host) {
+            $host = trim(explode(',', $host)[0]);
+
+            if (preg_match('/^[A-Za-z0-9.\-:\[\]]+$/', $host)) {
+                $scheme = request()->header('X-Forwarded-Proto')
+                    ?: (request()->secure() ? 'https' : 'http');
+                return $scheme . '://' . $host;
+            }
+        }
+
+        return '';
     }
 }
