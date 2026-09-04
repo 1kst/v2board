@@ -24,7 +24,7 @@ class UserController extends Controller
 {
     public function resetSecret(Request $request)
     {
-        $user = User::find($request->input('id'));
+        $user = User::withoutGlobalScopes()->find($request->input('id'));
         if (!$user) abort(500, '用户不存在');
         $user->token = Helper::guid();
         $user->uuid = Helper::guid(true);
@@ -46,7 +46,7 @@ class UserController extends Controller
                     $filter['value'] = $filter['value'] * 1073741824;
                 }
                 if ($filter['key'] === 'invite_by_email') {
-                    $user = User::where('email', $filter['condition'], $filter['value'])->first();
+                    $user = User::withoutGlobalScopes()->where('email', $filter['condition'], $filter['value'])->first();
                     $inviteUserId = isset($user->id) ? $user->id : 0;
                     $builder->where('invite_user_id', $inviteUserId);
                     unset($filters[$k]);
@@ -67,7 +67,10 @@ class UserController extends Controller
         $pageSize = $request->input('pageSize') >= 10 ? $request->input('pageSize') : 10;
         $sortType = in_array($request->input('sort_type'), ['ASC', 'DESC']) ? $request->input('sort_type') : 'DESC';
         $sort = $request->input('sort') ? $request->input('sort') : 'created_at';
-        $userModel = User::select(
+        // Administrators manage the unified user base. Public API requests
+        // remain site-scoped by the model global scope; only this admin
+        // controller intentionally reads across all three sites.
+        $userModel = User::withoutGlobalScopes()->select(
             DB::raw('*'),
             DB::raw('(u+d) as total_used')
         )
@@ -76,7 +79,7 @@ class UserController extends Controller
         $total = $userModel->count();
         $res = $userModel->forPage($current, $pageSize)
             ->get();
-        $plan = Plan::get();
+        $plan = Plan::withoutGlobalScopes()->get();
         for ($i = 0; $i < count($res); $i++) {
             for ($k = 0; $k < count($plan); $k++) {
                 if ($plan[$k]['id'] == $res[$i]['plan_id']) {
@@ -113,9 +116,9 @@ class UserController extends Controller
         if (empty($request->input('id'))) {
             abort(500, '参数错误');
         }
-        $user = User::find($request->input('id'));
+        $user = User::withoutGlobalScopes()->find($request->input('id'));
         if ($user->invite_user_id) {
-            $user['invite_user'] = User::find($user->invite_user_id);
+            $user['invite_user'] = User::withoutGlobalScopes()->find($user->invite_user_id);
         }
         return response([
             'data' => $user
@@ -125,11 +128,11 @@ class UserController extends Controller
     public function update(UserUpdate $request)
     {
         $params = $request->validated();
-        $user = User::find($request->input('id'));
+        $user = User::withoutGlobalScopes()->find($request->input('id'));
         if (!$user) {
             abort(500, '用户不存在');
         }
-        if (User::where('email', $params['email'])->first() && $user->email !== $params['email']) {
+        if (User::withoutGlobalScopes()->where('email', $params['email'])->first() && $user->email !== $params['email']) {
             abort(500, '邮箱已被使用');
         }
         if (isset($params['password'])) {
@@ -139,16 +142,17 @@ class UserController extends Controller
             unset($params['password']);
         }
         if (isset($params['plan_id'])) {
-            $plan = Plan::find($params['plan_id']);
+            $plan = Plan::withoutGlobalScopes()->find($params['plan_id']);
             if (!$plan) {
                 abort(500, '订阅计划不存在');
             }
             $params['group_id'] = $plan->group_id;
+            $params['site_id'] = $plan->site_id;
         } else {
             $params['group_id'] = null;
         }
         if ($request->input('invite_user_email')) {
-            $inviteUser = User::where('email', $request->input('invite_user_email'))->first();
+            $inviteUser = User::withoutGlobalScopes()->where('email', $request->input('invite_user_email'))->first();
             if ($inviteUser) {
                 $params['invite_user_id'] = $inviteUser->id;
             }
@@ -173,10 +177,10 @@ class UserController extends Controller
 
     public function dumpCSV(Request $request)
     {
-        $userModel = User::orderBy('id', 'asc');
+        $userModel = User::withoutGlobalScopes()->orderBy('id', 'asc');
         $this->filter($request, $userModel);
         $res = $userModel->get();
-        $plan = Plan::get();
+        $plan = Plan::withoutGlobalScopes()->get();
         for ($i = 0; $i < count($res); $i++) {
             for ($k = 0; $k < count($plan); $k++) {
                 if ($plan[$k]['id'] == $res[$i]['plan_id']) {
@@ -205,7 +209,7 @@ class UserController extends Controller
     {
         if ($request->input('email_prefix')) {
             if ($request->input('plan_id')) {
-                $plan = Plan::find($request->input('plan_id'));
+                $plan = Plan::withoutGlobalScopes()->find($request->input('plan_id'));
                 if (!$plan) {
                     abort(500, '订阅计划不存在');
                 }
@@ -213,6 +217,7 @@ class UserController extends Controller
             $user = [
                 'email' => $request->input('email_prefix') . '@' . $request->input('email_suffix'),
                 'plan_id' => isset($plan->id) ? $plan->id : NULL,
+                'site_id' => isset($plan->site_id) ? $plan->site_id : (int) $request->attributes->get('site_id', 1),
                 'group_id' => isset($plan->group_id) ? $plan->group_id : NULL,
                 'transfer_enable' => isset($plan->transfer_enable) ? $plan->transfer_enable * 1073741824 : 0,
                 'device_limit' => isset($plan->device_limit) ? $plan->device_limit : NULL,
@@ -220,7 +225,7 @@ class UserController extends Controller
                 'uuid' => Helper::guid(true),
                 'token' => Helper::guid()
             ];
-            if (User::where('email', $user['email'])->first()) {
+            if (User::withoutGlobalScopes()->where('email', $user['email'])->first()) {
                 abort(500, '邮箱已存在于系统中');
             }
             $user['password'] = password_hash($request->input('password') ?? $user['email'], PASSWORD_DEFAULT);
@@ -239,7 +244,7 @@ class UserController extends Controller
     private function multiGenerate(Request $request)
     {
         if ($request->input('plan_id')) {
-            $plan = Plan::find($request->input('plan_id'));
+            $plan = Plan::withoutGlobalScopes()->find($request->input('plan_id'));
             if (!$plan) {
                 abort(500, '订阅计划不存在');
             }
@@ -249,6 +254,7 @@ class UserController extends Controller
             $user = [
                 'email' => Helper::randomChar(6) . '@' . $request->input('email_suffix'),
                 'plan_id' => isset($plan->id) ? $plan->id : NULL,
+                'site_id' => isset($plan->site_id) ? $plan->site_id : (int) $request->attributes->get('site_id', 1),
                 'group_id' => isset($plan->group_id) ? $plan->group_id : NULL,
                 'transfer_enable' => isset($plan->transfer_enable) ? $plan->transfer_enable * 1073741824 : 0,
                 'device_limit' => isset($plan->device_limit) ? $plan->device_limit : NULL,
@@ -282,7 +288,7 @@ class UserController extends Controller
     {
         $sortType = in_array($request->input('sort_type'), ['ASC', 'DESC']) ? $request->input('sort_type') : 'DESC';
         $sort = $request->input('sort') ? $request->input('sort') : 'created_at';
-        $builder = User::orderBy($sort, $sortType);
+        $builder = User::withoutGlobalScopes()->orderBy($sort, $sortType);
         $this->filter($request, $builder);
         foreach ($builder->cursor() as $user) {
             SendEmailJob::dispatch([
@@ -307,7 +313,7 @@ class UserController extends Controller
     {
         $sortType = in_array($request->input('sort_type'), ['ASC', 'DESC']) ? $request->input('sort_type') : 'DESC';
         $sort = $request->input('sort') ? $request->input('sort') : 'created_at';
-        $builder = User::orderBy($sort, $sortType);
+        $builder = User::withoutGlobalScopes()->orderBy($sort, $sortType);
         $this->filter($request, $builder);
         try {
             $builder->each(function ($user){
@@ -330,7 +336,7 @@ class UserController extends Controller
     {
         $sortType = in_array($request->input('sort_type'), ['ASC', 'DESC']) ? $request->input('sort_type') : 'DESC';
         $sort = $request->input('sort') ? $request->input('sort') : 'created_at';
-        $builder = User::orderBy($sort, $sortType);
+        $builder = User::withoutGlobalScopes()->orderBy($sort, $sortType);
         $this->filter($request, $builder);
 
         DB::beginTransaction();
@@ -338,14 +344,14 @@ class UserController extends Controller
             $builder->each(function ($user){
                 $authService = new AuthService($user);
                 $authService->removeAllSession();
-                Order::where('user_id', $user->id)->delete();
-                InviteCode::where('user_id', $user->id)->delete();
-                $tickets = Ticket::where('user_id', $user->id)->get();
+                Order::withoutGlobalScopes()->where('user_id', $user->id)->delete();
+                InviteCode::withoutGlobalScopes()->where('user_id', $user->id)->delete();
+                $tickets = Ticket::withoutGlobalScopes()->where('user_id', $user->id)->get();
                 foreach($tickets as $ticket) {
-                    TicketMessage::where('ticket_id', $ticket->id)->delete();
+                    TicketMessage::withoutGlobalScopes()->where('ticket_id', $ticket->id)->delete();
                 }
-                Ticket::where('user_id', $user->id)->delete();
-                User::where('invite_user_id', $user->id)->update(['invite_user_id' => null]);
+                Ticket::withoutGlobalScopes()->where('user_id', $user->id)->delete();
+                User::withoutGlobalScopes()->where('invite_user_id', $user->id)->update(['invite_user_id' => null]);
             });
             $builder->delete();
             DB::commit();
@@ -361,7 +367,7 @@ class UserController extends Controller
 
     public function delUser(Request $request)
     {
-        $user = User::find($request->input('id'));
+        $user = User::withoutGlobalScopes()->find($request->input('id'));
         if (!$user) {
             abort(500, '用户不存在');
         }
@@ -369,15 +375,15 @@ class UserController extends Controller
         try {
             $authService = new AuthService($user);
             $authService->removeAllSession();
-            Order::where('user_id', $request->input('id'))->delete();
-            User::where('invite_user_id', $request->input('id'))->update(['invite_user_id' => null]);
-            InviteCode::where('user_id', $request->input('id'))->delete();
+            Order::withoutGlobalScopes()->where('user_id', $request->input('id'))->delete();
+            User::withoutGlobalScopes()->where('invite_user_id', $request->input('id'))->update(['invite_user_id' => null]);
+            InviteCode::withoutGlobalScopes()->where('user_id', $request->input('id'))->delete();
             
-            $tickets = Ticket::where('user_id', $request->input('id'))->get();
+            $tickets = Ticket::withoutGlobalScopes()->where('user_id', $request->input('id'))->get();
             foreach($tickets as $ticket) {
-                TicketMessage::where('ticket_id', $ticket->id)->delete();
+                TicketMessage::withoutGlobalScopes()->where('ticket_id', $ticket->id)->delete();
             }
-            Ticket::where('user_id', $request->input('id'))->delete();
+            Ticket::withoutGlobalScopes()->where('user_id', $request->input('id'))->delete();
     
             $user->delete();
             DB::commit();
