@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\SiteScope;
 use Illuminate\Database\Eloquent\Model;
 
 class Order extends Model
@@ -19,4 +20,14 @@ class Order extends Model
         'status' => 'integer',
         'type' => 'integer',
     ];
+
+    protected static function booted()
+    {
+        static::addGlobalScope(new SiteScope());
+        static::creating(function (self $order) {
+            if (app()->bound('site_id') && !$order->site_id) {
+                $order->site_id = (int) app('site_id');
+            }
+        });
+    }
 }

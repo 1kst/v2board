@@ -110,6 +110,7 @@ class CheckCommission extends Command
                 return false;
             }
             if (!CommissionLog::create([
+                'site_id' => $order->site_id,
                 'invite_user_id' => $inviteUserId,
                 'user_id' => $order->user_id,
                 'trade_no' => $order->trade_no,

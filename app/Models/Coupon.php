@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\SiteScope;
 use Illuminate\Database\Eloquent\Model;
 
 class Coupon extends Model
@@ -15,4 +16,14 @@ class Coupon extends Model
         'limit_plan_ids' => 'array',
         'limit_period' => 'array'
     ];
+
+    protected static function booted()
+    {
+        static::addGlobalScope(new SiteScope());
+        static::creating(function (self $coupon) {
+            if (app()->bound('site_id') && !$coupon->site_id) {
+                $coupon->site_id = (int) app('site_id');
+            }
+        });
+    }
 }

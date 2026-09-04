@@ -18,7 +18,15 @@ class PaymentService
         $this->class = '\\App\\Payments\\' . $this->method;
         if (!class_exists($this->class)) abort(500, 'gate is not found');
         if ($id) $payment = Payment::find($id)->toArray();
-        if ($uuid) $payment = Payment::where('uuid', $uuid)->first()->toArray();
+        // 支付回调不带前端的站点请求头。支付 UUID 全库唯一，因此先跳过默认
+        // site=1 作用域定位网关，再把回调请求切换到该网关所属站点，随后订单查询
+        // 会自然落在同一站点，避免站点 2/3 的合法回调被当作不存在。
+        if ($uuid) {
+            $paymentModel = Payment::withoutGlobalScopes()->where('uuid', $uuid)->first();
+            if (!$paymentModel) abort(500, 'payment is not found');
+            app()->instance('site_id', (int) $paymentModel->site_id);
+            $payment = $paymentModel->toArray();
+        }
         $this->config = [];
         if (isset($payment)) {
             $this->config = $payment['config'];

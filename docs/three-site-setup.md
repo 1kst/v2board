@@ -47,6 +47,17 @@ All API clients for site 2 and 3 must send `X-Site-ID` and the matching
 Subscription requests remain domain-independent: their user token determines
 the site after lookup.
 
+## Orders, coupons and payments
+
+`v2_order`, `v2_commission_log`, `v2_coupon`, and `v2_payment` are also
+isolated with `site_id`. The merged database marks existing main-site records
+as site 1; source-site historical orders, payments, and coupons are not
+imported under the agreed migration policy.
+
+Create coupons and payment methods for sites 2 and 3 separately in their
+admin panels. Payment callbacks identify their site from the globally unique
+payment UUID, so a third-party gateway does not need to send site headers.
+
 After changing environment values on the server, run `php artisan config:clear`
 and restart Horizon/queue workers. A queue worker must restart so it does not
 retain a previous site's configuration in memory.

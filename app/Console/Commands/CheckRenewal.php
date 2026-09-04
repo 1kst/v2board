@@ -87,6 +87,7 @@ class CheckRenewal extends Command
                     DB::beginTransaction();
                     $order = new Order();
                     $orderService = new OrderService($order);
+                    $order->site_id = $user->site_id;
                     $order->user_id = $user->id;
                     $order->plan_id = $plan->id;
                     $order->period = $latestPeriod;
