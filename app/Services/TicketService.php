@@ -15,6 +15,7 @@ class TicketService {
     {
         DB::beginTransaction();
         $ticketMessage = TicketMessage::create([
+            'site_id' => $ticket->site_id,
             'user_id' => $userId,
             'ticket_id' => $ticket->id,
             'message' => $message
@@ -42,6 +43,7 @@ class TicketService {
         
         DB::beginTransaction();
         $ticketMessage = TicketMessage::create([
+            'site_id' => $ticket->site_id,
             'user_id' => $userId,
             'ticket_id' => $ticket->id,
             'message' => $message

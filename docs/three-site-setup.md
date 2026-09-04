@@ -49,10 +49,11 @@ the site after lookup.
 
 ## Orders, coupons and payments
 
-`v2_order`, `v2_commission_log`, `v2_coupon`, and `v2_payment` are also
-isolated with `site_id`. The merged database marks existing main-site records
-as site 1; source-site historical orders, payments, and coupons are not
-imported under the agreed migration policy.
+`v2_order`, `v2_commission_log`, `v2_coupon`, `v2_payment`, `v2_ticket`, and
+`v2_ticket_message` are also isolated with `site_id`. The merged database
+marks existing main-site records as site 1; source-site historical orders,
+payments, coupons, and tickets are not imported under the agreed migration
+policy.
 
 Create coupons and payment methods for sites 2 and 3 separately in their
 admin panels. Payment callbacks identify their site from the globally unique
