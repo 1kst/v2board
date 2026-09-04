@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use App\Models\Scopes\SiteScope;
 
 class Plan extends Model
 {
@@ -13,4 +14,9 @@ class Plan extends Model
         'created_at' => 'timestamp',
         'updated_at' => 'timestamp'
     ];
+
+    protected static function booted()
+    {
+        static::addGlobalScope(new SiteScope());
+    }
 }

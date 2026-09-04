@@ -53,7 +53,7 @@ class Client
                         // 修改点 4：TOTP token 格式错误
                         return redirect()->away('https://www.baidu.com');
                     }
-                    $user = User::where('id', $userid)->select('token')->first();
+                    $user = User::withoutGlobalScopes()->where('id', $userid)->select('token', 'site_id')->first();
                     if (!$user) {
                         // 修改点 5：TOTP token 中的用户 ID 错误
                         return redirect()->away('https://www.baidu.com');
@@ -71,11 +71,17 @@ class Client
             default:
                 break;
         }
-        $user = User::where('token', $token)->first();
+        // Subscription URLs may use any of the station's domains and usually
+        // have no custom headers. Resolve the owner unscoped, then bind all
+        // following user/plan queries to that owner's site.
+        $user = User::withoutGlobalScopes()->where('token', $token)->first();
         if (!$user) {
             // 修改点 7：最终的 token 在数据库中找不到
             return redirect()->away('https://www.baidu.com');
         }
+        $siteId = (int)($user->site_id ?? 1);
+        $request->attributes->set('site_id', $siteId);
+        app()->instance('site_id', $siteId);
         $request->merge([
             'user' => $user
         ]);

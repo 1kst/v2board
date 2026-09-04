@@ -11,6 +11,7 @@ use App\Utils\CacheKey;
 use App\Utils\Dict;
 use App\Utils\Helper;
 use App\Utils\TurnstileVerifier;
+use App\Services\SiteConfigService;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -30,6 +31,9 @@ class CommController extends Controller
 
     public function sendEmailVerify(CommSendEmailVerify $request)
     {
+        $siteConfig = app(SiteConfigService::class);
+        $siteId = (int)$request->attributes->get('site_id', 1);
+        $site = $siteConfig->get($siteId);
         $ip = $request->ip();
         if (RateLimiter::tooManyAttempts($ip, 3)) {
             abort(429, __('Too many requests, please try again later.'));
@@ -42,9 +46,9 @@ class CommController extends Controller
             }
         }
         $email = $request->input('email');
-        $cacheKeyEmail = strtolower(trim((string)$email));
+        $cacheKeyEmail = $siteConfig->cacheValue($siteId, (string)$email);
         $isforget = $request->input('isforget');
-        $email_exists = User::where('email', $email)->exists();
+        $email_exists = User::where('email', $email)->where('site_id', $siteId)->exists();
         //检查是否在白名单内
         if ((int)config('v2board.email_whitelist_enable', 0)) {
             if (!Helper::emailSuffixVerify(
@@ -73,16 +77,17 @@ class CommController extends Controller
             abort(500, __('Email verification code has been sent, please request again later'));
         }
         $code = (string)rand(100000, 999999);
-        $subject = config('v2board.app_name', 'V2Board') . __('Email verification code');
+        $subject = $site['name'] . __('Email verification code');
 
         SendEmailJob::dispatch([
+            'site_id' => $siteId,
             'email' => $email,
             'subject' => $subject,
             'template_name' => 'verify',
             'template_value' => [
-                'name' => config('v2board.app_name', 'V2Board'),
+                'name' => $site['name'],
                 'code' => $code,
-                'url' => config('v2board.app_url')
+                'url' => $site['url']
             ]
         ]);
 

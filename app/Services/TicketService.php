@@ -6,6 +6,7 @@ use App\Jobs\SendEmailJob;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
 use App\Models\User;
+use App\Services\SiteConfigService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
@@ -64,16 +65,19 @@ class TicketService {
     private function sendEmailNotify(Ticket $ticket, TicketMessage $ticketMessage)
     {
         $user = User::find($ticket->user_id);
-        $cacheKey = 'ticket_sendEmailNotify_' . $ticket->user_id;
+        $siteId = (int)($user->site_id ?? 1);
+        $site = app(SiteConfigService::class)->get($siteId);
+        $cacheKey = 'ticket_sendEmailNotify_' . $siteId . '_' . $ticket->user_id;
         if (!Cache::get($cacheKey)) {
             Cache::put($cacheKey, 1, 1800);
             SendEmailJob::dispatch([
+                'site_id' => $siteId,
                 'email' => $user->email,
-                'subject' => '您在' . config('v2board.app_name', 'V2Board') . '的工单得到了回复',
+                'subject' => '您在' . $site['name'] . '的工单得到了回复',
                 'template_name' => 'notify',
                 'template_value' => [
-                    'name' => config('v2board.app_name', 'V2Board'),
-                    'url' => config('v2board.app_url'),
+                    'name' => $site['name'],
+                    'url' => $site['url'],
                     'content' => "主题：{$ticket->subject}\r\n回复内容：{$ticketMessage->message}"
                 ]
             ]);

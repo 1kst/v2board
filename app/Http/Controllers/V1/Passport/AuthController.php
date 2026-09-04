@@ -11,6 +11,7 @@ use App\Models\InviteCode;
 use App\Models\Plan;
 use App\Models\User;
 use App\Services\AuthService;
+use App\Services\SiteConfigService;
 use App\Utils\CacheKey;
 use App\Utils\Dict;
 use App\Utils\Helper;
@@ -22,6 +23,8 @@ class AuthController extends Controller
 {
     public function register(AuthRegister $request)
     {
+        $siteConfig = app(SiteConfigService::class);
+        $siteId = (int)$request->attributes->get('site_id', 1);
         if ((int)config('v2board.register_limit_by_ip_enable', 0)) {
             $registerCountByIP = Cache::get(CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip())) ?? 0;
             if ((int)$registerCountByIP >= (int)config('v2board.register_limit_count', 3)) {
@@ -65,7 +68,7 @@ class AuthController extends Controller
             }
         }
         $email = $request->input('email');
-        $cacheKeyEmail = is_string($email) ? strtolower(trim($email)) : '';
+        $cacheKeyEmail = is_string($email) ? $siteConfig->cacheValue($siteId, $email) : '';
         if ((int)config('v2board.email_verify', 0)) {
             $inputCode = $request->input('email_code');
             if (!is_string($inputCode) || !preg_match('/^\d{6}$/', $inputCode)) {
@@ -77,11 +80,14 @@ class AuthController extends Controller
             }
         }
         $password = $request->input('password');
-        $exist = User::where('email', $email)->first();
+        // Email remains globally unique, but a newly created account belongs to
+        // the brand selected by the verified registration request.
+        $exist = User::withoutGlobalScopes()->where('email', $email)->first();
         if ($exist) {
             abort(500, __('Email already exists'));
         }
         $user = new User();
+        $user->site_id = $siteId;
         $user->email = $email;
         $user->password = password_hash($password, PASSWORD_DEFAULT);
         $user->uuid = Helper::guid(true);
@@ -143,6 +149,7 @@ class AuthController extends Controller
 
     public function login(AuthLogin $request)
     {
+        $siteId = (int)$request->attributes->get('site_id', 1);
         $email = $request->input('email');
         $password = $request->input('password');
 
@@ -155,7 +162,7 @@ class AuthController extends Controller
             }
         }
 
-        $user = User::where('email', $email)->first();
+        $user = User::where('email', $email)->where('site_id', $siteId)->first();
         if (!$user) {
             abort(500, __('Incorrect email or password'));
         }
@@ -242,6 +249,8 @@ class AuthController extends Controller
 
     public function forget(AuthForget $request)
     {
+        $siteConfig = app(SiteConfigService::class);
+        $siteId = (int)$request->attributes->get('site_id', 1);
         $email     = $request->input('email');
         $inputCode = $request->input('email_code');
         $password  = $request->input('password');
@@ -253,7 +262,7 @@ class AuthController extends Controller
             abort(500, __('Incorrect email verification code'));
         }
 
-        $cacheKeyEmail         = strtolower(trim($email));
+        $cacheKeyEmail         = $siteConfig->cacheValue($siteId, $email);
         $forgetRequestLimitKey = CacheKey::get('FORGET_REQUEST_LIMIT', $cacheKeyEmail);
         $forgetRequestLimit    = (int)Cache::get($forgetRequestLimitKey);
         if ($forgetRequestLimit >= 3) {
@@ -265,7 +274,7 @@ class AuthController extends Controller
             Cache::put($forgetRequestLimitKey, $forgetRequestLimit + 1, 300);
             abort(500, __('Incorrect email verification code'));
         }
-        $user = User::where('email', $email)->first();
+        $user = User::where('email', $email)->where('site_id', $siteId)->first();
         if (!$user) {
             abort(500, __('This email is not registered in the system'));
         }

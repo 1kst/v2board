@@ -39,13 +39,14 @@ class ConfigController extends Controller
     public function testSendMail(Request $request)
     {
         $obj = new SendEmailJob([
+            'site_id' => (int)($request->user['site_id'] ?? 1),
             'email' => $request->user['email'],
             'subject' => 'This is v2board test email',
             'template_name' => 'notify',
             'template_value' => [
-                'name' => config('v2board.app_name', 'V2Board'),
+                'name' => app(\App\Services\SiteConfigService::class)->get((int)($request->user['site_id'] ?? 1))['name'],
                 'content' => 'This is v2board test email',
-                'url' => config('v2board.app_url')
+                'url' => app(\App\Services\SiteConfigService::class)->get((int)($request->user['site_id'] ?? 1))['url']
             ]
         ]);
         return response([

@@ -21,6 +21,9 @@ class User
 
         $user = AuthService::decryptAuthData($authorization);
         if (!$user) abort(403, '未登录或登陆已过期');
+        if ((int)($user['site_id'] ?? 1) !== (int)$request->attributes->get('site_id', 1)) {
+            abort(403, '站点与登录账号不匹配');
+        }
         $request->merge([
             'user' => $user
         ]);

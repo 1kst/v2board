@@ -70,12 +70,13 @@ class UserController extends Controller
         $users = $builder->get();
         foreach ($users as $user) {
             SendEmailJob::dispatch([
+                'site_id' => (int)($user->site_id ?? 1),
                 'email' => $user->email,
                 'subject' => $request->input('subject'),
                 'template_name' => 'notify',
                 'template_value' => [
-                    'name' => config('v2board.app_name', 'V2Board'),
-                    'url' => config('v2board.app_url'),
+                    'name' => app(\App\Services\SiteConfigService::class)->get((int)($user->site_id ?? 1))['name'],
+                    'url' => app(\App\Services\SiteConfigService::class)->get((int)($user->site_id ?? 1))['url'],
                     'content' => $request->input('content')
                 ]
             ]);
