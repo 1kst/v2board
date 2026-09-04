@@ -70896,6 +70896,12 @@
                         }), e)
                     }
                 }, {
+                    title: "\u5f52\u5c5e\u7ad9\u70b9",
+                    dataIndex: "site_id",
+                    key: "site_id",
+                    sorter: !0,
+                    render: e=>e || 1
+                }, {
                     title: "\u72b6\u6001",
                     dataIndex: "banned",
                     key: "banned",
