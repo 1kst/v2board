@@ -23,12 +23,18 @@ class PlanService
         return ($this->plan->capacity_limit - $count) > 0;
     }
 
-    public static function countActiveUsers()
+    public static function countActiveUsers(bool $allSites = false)
     {
-        return User::select(
+        $query = User::select(
             DB::raw("plan_id"),
             DB::raw("count(*) as count")
-        )
+        );
+
+        if ($allSites) {
+            $query->withoutGlobalScopes();
+        }
+
+        return $query
             ->where('plan_id', '!=', NULL)
             ->where(function ($query) {
                 $query->where('expired_at', '>=', time())

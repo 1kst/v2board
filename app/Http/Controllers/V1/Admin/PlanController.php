@@ -17,8 +17,11 @@ class PlanController extends Controller
 {
     public function fetch(Request $request)
     {
-        $counts = PlanService::countActiveUsers();
-        $plans = Plan::orderBy('sort', 'ASC')->get();
+        // The admin panel is shared by all three brands. Do not apply the
+        // request site's public-facing scope here, otherwise only site 1
+        // plans appear and migrated users seem to have lost their plans.
+        $counts = PlanService::countActiveUsers(true);
+        $plans = Plan::withoutGlobalScopes()->orderBy('site_id', 'ASC')->orderBy('sort', 'ASC')->get();
         foreach ($plans as $k => $v) {
             $plans[$k]->count = 0;
             foreach ($counts as $kk => $vv) {
@@ -34,7 +37,7 @@ class PlanController extends Controller
     {
         $params = $request->validated();
         if ($request->input('id')) {
-            $plan = Plan::find($request->input('id'));
+            $plan = Plan::withoutGlobalScopes()->find($request->input('id'));
             if (!$plan) {
                 abort(500, '该订阅不存在');
             }
@@ -42,7 +45,7 @@ class PlanController extends Controller
             // update user group id and transfer
             try {
                 if ($request->input('force_update')) {
-                    User::where('plan_id', $plan->id)->update([
+                    User::withoutGlobalScopes()->where('plan_id', $plan->id)->update([
                         'group_id' => $params['group_id'],
                         'transfer_enable' => $params['transfer_enable'] * 1073741824,
                         'device_limit' => $params['device_limit'],
@@ -69,14 +72,14 @@ class PlanController extends Controller
 
     public function drop(Request $request)
     {
-        if (Order::where('plan_id', $request->input('id'))->first()) {
+        if (Order::withoutGlobalScopes()->where('plan_id', $request->input('id'))->first()) {
             abort(500, '该订阅下存在订单无法删除');
         }
-        if (User::where('plan_id', $request->input('id'))->first()) {
+        if (User::withoutGlobalScopes()->where('plan_id', $request->input('id'))->first()) {
             abort(500, '该订阅下存在用户无法删除');
         }
         if ($request->input('id')) {
-            $plan = Plan::find($request->input('id'));
+            $plan = Plan::withoutGlobalScopes()->find($request->input('id'));
             if (!$plan) {
                 abort(500, '该订阅ID不存在');
             }
@@ -93,7 +96,7 @@ class PlanController extends Controller
             'renew'
         ]);
 
-        $plan = Plan::find($request->input('id'));
+        $plan = Plan::withoutGlobalScopes()->find($request->input('id'));
         if (!$plan) {
             abort(500, '该订阅不存在');
         }
@@ -113,7 +116,8 @@ class PlanController extends Controller
     {
         DB::beginTransaction();
         foreach ($request->input('plan_ids') as $k => $v) {
-            if (!Plan::find($v)->update(['sort' => $k + 1])) {
+            $plan = Plan::withoutGlobalScopes()->find($v);
+            if (!$plan || !$plan->update(['sort' => $k + 1])) {
                 DB::rollBack();
                 abort(500, '保存失败');
             }
