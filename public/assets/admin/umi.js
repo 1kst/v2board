@@ -22296,6 +22296,13 @@
                     className: "form-group"
                 }, p.a.createElement("label", {
                     for: "example-text-input-alt"
+                }, "\u6240\u5c5e\u7ad9\u70b9 ID"), p.a.createElement(u["a"], {
+                    readOnly: !0,
+                    value: t.site_id || 1
+                })), p.a.createElement("div", {
+                    className: "form-group"
+                }, p.a.createElement("label", {
+                    for: "example-text-input-alt"
                 }, "\u9080\u8bf7\u4eba\u90ae\u7bb1"), p.a.createElement(u["a"], {
                     placeholder: "\u8bf7\u8f93\u5165\u9080\u8bf7\u4eba\u90ae\u7bb1",
                     defaultValue: t.invite_user_email,
