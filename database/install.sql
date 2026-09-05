@@ -98,6 +98,22 @@ CREATE TABLE `v2_knowledge` (
                                 PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='知識庫';
 
+DROP TABLE IF EXISTS `v2_notice_site`;
+CREATE TABLE `v2_notice_site` (
+    `notice_id` int(11) unsigned NOT NULL,
+    `site_id` tinyint(3) unsigned NOT NULL,
+    PRIMARY KEY (`notice_id`, `site_id`),
+    KEY `v2_notice_site_site_id_index` (`site_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='公告归属站点';
+
+DROP TABLE IF EXISTS `v2_knowledge_site`;
+CREATE TABLE `v2_knowledge_site` (
+    `knowledge_id` int(11) unsigned NOT NULL,
+    `site_id` tinyint(3) unsigned NOT NULL,
+    PRIMARY KEY (`knowledge_id`, `site_id`),
+    KEY `v2_knowledge_site_site_id_index` (`site_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='知识库归属站点';
+
 
 DROP TABLE IF EXISTS `v2_log`;
 CREATE TABLE `v2_log` (

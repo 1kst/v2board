@@ -5,6 +5,7 @@ namespace App\Http\Controllers\V1\User;
 use App\Http\Controllers\Controller;
 use App\Models\Knowledge;
 use App\Models\User;
+use App\Services\ContentSiteService;
 use App\Services\UserService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
@@ -13,12 +14,15 @@ class KnowledgeController extends Controller
 {
     public function fetch(Request $request)
     {
+        $contentSites = app(ContentSiteService::class);
+        $siteId = $contentSites->requestSiteId($request);
+
         if ($request->input('id')) {
-            $knowledge = Knowledge::where('id', $request->input('id'))
-                ->where('show', 1)
-                ->first()
-                ->toArray();
+            $knowledge = Knowledge::where('id', $request->input('id'))->where('show', 1);
+            $contentSites->forSite($knowledge, 'v2_knowledge_site', 'knowledge_id', $siteId);
+            $knowledge = $knowledge->first();
             if (!$knowledge) abort(500, __('Article does not exist'));
+            $knowledge = $knowledge->toArray();
             $user = User::find($request->user['id']);
             $userService = new UserService();
             if (!$userService->isAvailable($user)) {
@@ -46,6 +50,7 @@ class KnowledgeController extends Controller
             ->where('language', $request->input('language'))
             ->where('show', 1)
             ->orderBy('sort', 'ASC');
+        $contentSites->forSite($builder, 'v2_knowledge_site', 'knowledge_id', $siteId);
         $keyword = $request->input('keyword');
         if ($keyword) {
             $builder = $builder->where(function ($query) use ($keyword) {

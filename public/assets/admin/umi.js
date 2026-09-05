@@ -31342,6 +31342,11 @@
                     dataIndex: "title",
                     key: "title"
                 }, {
+                    title: "\u5f52\u5c5e\u7ad9\u70b9",
+                    dataIndex: "site_ids",
+                    key: "site_ids",
+                    render: e=>g.a.createElement("span", null, e && e.length ? e.join(", ") : "1")
+                }, {
                     title: "\u521b\u5efa\u65f6\u95f4",
                     dataIndex: "created_at",
                     key: "created_at",
@@ -31452,6 +31457,30 @@
                         })
                     }
                 })), g.a.createElement("div", {
+                    className: "form-group"
+                }, g.a.createElement("label", {
+                    htmlFor: "notice-site-ids"
+                }, "\u5f52\u5c5e\u7ad9\u70b9"), g.a.createElement(a["a"], {
+                    id: "notice-site-ids",
+                    mode: "multiple",
+                    value: this.state.submit.site_ids || [1],
+                    style: {
+                        width: "100%"
+                    },
+                    onChange: e=>{
+                        this.setState({
+                            submit: p()({}, this.state.submit, {
+                                site_ids: e
+                            })
+                        })
+                    }
+                }, g.a.createElement(a["a"].Option, {
+                    value: 1
+                }, "1"), g.a.createElement(a["a"].Option, {
+                    value: 2
+                }, "2"), g.a.createElement(a["a"].Option, {
+                    value: 3
+                }, "3"))), g.a.createElement("div", {
                     className: "form-group"
                 }, g.a.createElement("label", {
                     for: "example-text-input-alt"
@@ -83861,6 +83890,24 @@
                 ))), f.a.createElement("div", {
                     className: "form-group"
                 }, f.a.createElement("label", {
+                    htmlFor: "knowledge-site-ids"
+                }, "\u5f52\u5c5e\u7ad9\u70b9"), f.a.createElement(b["a"], {
+                    id: "knowledge-site-ids",
+                    mode: "multiple",
+                    value: n.site_ids || [1],
+                    style: {
+                        width: "100%"
+                    },
+                    onChange: e=>this.formChange("site_ids", e)
+                }, f.a.createElement(b["a"].Option, {
+                    value: 1
+                }, "1"), f.a.createElement(b["a"].Option, {
+                    value: 2
+                }, "2"), f.a.createElement(b["a"].Option, {
+                    value: 3
+                }, "3"))), f.a.createElement("div", {
+                    className: "form-group"
+                }, f.a.createElement("label", {
                     htmlFor: "example-text-input-alt"
                 }, "\u5185\u5bb9"), f.a.createElement(L, {
                     key: this.key,
@@ -83963,6 +84010,11 @@
                     title: "\u6587\u7ae0ID",
                     dataIndex: "id",
                     key: "id"
+                }, {
+                    title: "\u5f52\u5c5e\u7ad9\u70b9",
+                    dataIndex: "site_ids",
+                    key: "site_ids",
+                    render: e=>f.a.createElement("span", null, e && e.length ? e.join(", ") : "1")
                 }, {
                     title: "\u663e\u793a",
                     dataIndex: "show",

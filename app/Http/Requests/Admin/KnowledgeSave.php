@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class KnowledgeSave extends FormRequest
 {
@@ -17,7 +18,9 @@ class KnowledgeSave extends FormRequest
             'category' => 'required',
             'language' => 'required',
             'title' => 'required',
-            'body' => 'required'
+            'body' => 'required',
+            'site_ids' => 'nullable|array|min:1',
+            'site_ids.*' => ['integer', Rule::in(array_keys(config('sites', [])))]
         ];
     }
 

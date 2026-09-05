@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class NoticeSave extends FormRequest
 {
@@ -17,7 +18,9 @@ class NoticeSave extends FormRequest
             'title' => 'required',
             'content' => 'required',
             'img_url' => 'nullable|url',
-            'tags' => 'nullable|array'
+            'tags' => 'nullable|array',
+            'site_ids' => 'nullable|array|min:1',
+            'site_ids.*' => ['integer', Rule::in(array_keys(config('sites', [])))]
         ];
     }
 
