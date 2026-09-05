@@ -25,6 +25,12 @@ class OrderService
     public function __construct(Order $order)
     {
         $this->order = $order;
+        // 订单列表和支付方式是全局的，但 User、Plan 等仍按站点隔离。每次处理
+        // 已落库订单前都以订单自身的归属恢复站点上下文，供 HTTP 回调、后台手工
+        // 操作和队列任务共用。
+        if ($order->exists && $order->site_id) {
+            app()->instance('site_id', (int) $order->site_id);
+        }
     }
 
     public function open()

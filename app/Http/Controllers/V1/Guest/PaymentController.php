@@ -37,6 +37,11 @@ class PaymentController extends Controller
         if (!$order) {
             abort(500, 'order is not found');
         }
+
+        // 同一个网关可处理三站订单。订单保留的 site_id 只用于在后续开通、
+        // 余额和套餐查询时切回正确的用户站点，不再限制订单或支付方式的可见性。
+        app()->instance('site_id', (int) ($order->site_id ?: 1));
+
         if ((int)$order->status !== 0) return true;
 
         // 订单 payment_id 为空 = 从未经 checkout 绑定过任何网关（伪造/重放该单），拒绝。

@@ -34,12 +34,10 @@ class PaymentController extends Controller
     {
         $payments = Payment::orderBy('sort', 'ASC')->get();
         foreach ($payments as $k => $v) {
-            $notifyUrl = url("/api/v1/guest/payment/notify/{$v->payment}/{$v->uuid}");
-            if ($v->notify_domain) {
-                $parseUrl = parse_url($notifyUrl);
-                $notifyUrl = $v->notify_domain . $parseUrl['path'];
-            }
-            $payments[$k]['notify_url'] = $notifyUrl;
+            $notifyDomain = rtrim((string) $v->notify_domain, '/');
+            $payments[$k]['notify_url'] = $notifyDomain
+                ? $notifyDomain . "/api/v1/guest/payment/notify/{$v->payment}/{$v->uuid}"
+                : null;
         }
         return response([
             'data' => $payments
@@ -75,14 +73,15 @@ class PaymentController extends Controller
             'icon' => 'nullable',
             'payment' => 'required',
             'config' => 'required',
-            'notify_domain' => 'nullable|url',
+            'notify_domain' => 'required|url',
             'handling_fee_fixed' => 'nullable|integer',
             'handling_fee_percent' => 'nullable|numeric|between:0.1,100'
         ], [
             'name.required' => '显示名称不能为空',
             'payment.required' => '网关参数不能为空',
             'config.required' => '配置参数不能为空',
-            'notify_domain.url' => '自定义通知域名格式有误',
+            'notify_domain.required' => '请填写支付回调域名，不能使用后端地址',
+            'notify_domain.url' => '支付回调域名格式有误',
             'handling_fee_fixed.integer' => '固定手续费格式有误',
             'handling_fee_percent.between' => '百分比手续费范围须在0.1-100之间'
         ]);

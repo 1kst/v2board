@@ -17,14 +17,16 @@ class PaymentService
         $this->method = $method;
         $this->class = '\\App\\Payments\\' . $this->method;
         if (!class_exists($this->class)) abort(500, 'gate is not found');
-        if ($id) $payment = Payment::find($id)->toArray();
-        // 支付回调不带前端的站点请求头。支付 UUID 全库唯一，因此先跳过默认
-        // site=1 作用域定位网关，再把回调请求切换到该网关所属站点，随后订单查询
-        // 会自然落在同一站点，避免站点 2/3 的合法回调被当作不存在。
-        if ($uuid) {
-            $paymentModel = Payment::withoutGlobalScopes()->where('uuid', $uuid)->first();
+        if ($id) {
+            $paymentModel = Payment::find($id);
             if (!$paymentModel) abort(500, 'payment is not found');
-            app()->instance('site_id', (int) $paymentModel->site_id);
+            $payment = $paymentModel->toArray();
+        }
+        // 支付方式是全局共享的；回调 URL 中的 UUID 只用于定位和验证网关配置。
+        // 订单归属应由订单自身决定，不能再由支付方式的历史 site_id 推断。
+        if ($uuid) {
+            $paymentModel = Payment::where('uuid', $uuid)->first();
+            if (!$paymentModel) abort(500, 'payment is not found');
             $payment = $paymentModel->toArray();
         }
         $this->config = [];
@@ -46,18 +48,17 @@ class PaymentService
 
     public function pay($order)
     {
-        // custom notify domain name
-        $notifyUrl = url("/api/v1/guest/payment/notify/{$this->method}/{$this->config['uuid']}");
-        if ($this->config['notify_domain']) {
-            $parseUrl = parse_url($notifyUrl);
-            $notifyUrl = $this->config['notify_domain'] . $parseUrl['path'];
+        // 网关通知必须经过已配置的公网回调域名，绝不能退回到 APP_URL（后端地址）。
+        $notifyDomain = rtrim((string) ($this->config['notify_domain'] ?? ''), '/');
+        if ($notifyDomain === '') {
+            abort(500, '请先配置支付回调域名');
         }
+        $notifyUrl = $notifyDomain . "/api/v1/guest/payment/notify/{$this->method}/{$this->config['uuid']}";
         $currentBase = $this->currentBase();
-        if ($currentBase) { 
-            $returnUrl = $currentBase . '/#/order/' . $order['trade_no'];
-        } else {
-            $returnUrl = url('/#/order/' . $order['trade_no']);
+        if (!$currentBase) {
+            abort(500, '无法识别支付完成跳转的前端域名');
         }
+        $returnUrl = $currentBase . '/#/order/' . $order['trade_no'];
         return $this->payment->pay([
             'notify_url' => $notifyUrl,
             'return_url' => $returnUrl,
@@ -98,6 +99,12 @@ class PaymentService
                     ?: (request()->secure() ? 'https' : 'http');
                 return $scheme . '://' . $host;
             }
+        }
+
+        $siteId = app()->bound('site_id') ? (int) app('site_id') : 1;
+        $siteUrl = rtrim((string) config("sites.{$siteId}.url"), '/');
+        if ($siteUrl && filter_var($siteUrl, FILTER_VALIDATE_URL)) {
+            return $siteUrl;
         }
 
         return '';

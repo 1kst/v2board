@@ -40,6 +40,9 @@ class OrderHandleJob implements ShouldQueue
 
         if (!$order) return;
 
+        // 队列进程不会携带浏览器请求的站点上下文；显式按订单归属恢复，确保
+        // User / Plan 的站点作用域不会落到上一个长驻任务的站点。
+        app()->instance('site_id', (int) ($order->site_id ?: 1));
         $orderService = new OrderService($order);
         switch ($order->status) {
             case 0:

@@ -49,15 +49,16 @@ the site after lookup.
 
 ## Orders, coupons and payments
 
-`v2_order`, `v2_commission_log`, `v2_coupon`, `v2_payment`, `v2_ticket`, and
-`v2_ticket_message` are also isolated with `site_id`. The merged database
-marks existing main-site records as site 1; source-site historical orders,
-payments, coupons, and tickets are not imported under the agreed migration
-policy.
+`v2_commission_log`, `v2_coupon`, `v2_ticket`, and `v2_ticket_message` remain
+isolated with `site_id`. The merged database marks existing main-site records
+as site 1; source-site historical orders, payments, coupons, and tickets are
+not imported under the agreed migration policy.
 
-Create coupons and payment methods for sites 2 and 3 separately in their
-admin panels. Payment callbacks identify their site from the globally unique
-payment UUID, so a third-party gateway does not need to send site headers.
+`v2_order` and `v2_payment` are global: all three frontends use one payment
+configuration and the administrator sees one combined order list. Orders keep
+their `site_id` internally only so payment callbacks, queue jobs, and manual
+operations can find the correct user and plan. See
+`docs/shared-payment-and-callback-proxy.md` before enabling a payment method.
 
 After changing environment values on the server, run `php artisan config:clear`
 and restart Horizon/queue workers. A queue worker must restart so it does not
