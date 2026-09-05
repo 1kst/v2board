@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class PlanSave extends FormRequest
 {
@@ -29,7 +30,11 @@ class PlanSave extends FormRequest
             'reset_price' => 'nullable|integer',
             'reset_traffic_method' => 'nullable|integer|in:0,1,2,3,4',
             'capacity_limit' => 'nullable|integer',
-            'speed_limit' => 'nullable|integer'
+            'speed_limit' => 'nullable|integer',
+            // Only used when creating a plan.  Existing plans keep their
+            // original ownership so that users, orders and email branding
+            // cannot become inconsistent through an edit.
+            'site_id' => ['nullable', 'integer', Rule::in(array_keys(config('sites', [])))]
         ];
     }
 

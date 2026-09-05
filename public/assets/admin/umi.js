@@ -82475,6 +82475,7 @@
                     visible: !1,
                     record: e.record || {
                         show: 0,
+                        site_id: 1,
                         name: null,
                         transfer_enable: null,
                         group_id: void 0,
@@ -82568,7 +82569,30 @@
                             })
                         })
                     }
-                })), m.a.createElement(k["a"], {
+                })), this.state.record.id ? null : m.a.createElement("div", {
+                    className: "form-group"
+                }, m.a.createElement("label", {
+                    htmlFor: "plan-site-id"
+                }, "\u5f52\u5c5e\u7ad9\u70b9"), m.a.createElement(_["a"], {
+                    id: "plan-site-id",
+                    style: {
+                        width: "100%"
+                    },
+                    value: this.state.record.site_id || 1,
+                    onChange: e=>{
+                        this.setState({
+                            record: d()({}, this.state.record, {
+                                site_id: e
+                            })
+                        })
+                    }
+                }, m.a.createElement(_["a"].Option, {
+                    value: 1
+                }, "1"), m.a.createElement(_["a"].Option, {
+                    value: 2
+                }, "2"), m.a.createElement(_["a"].Option, {
+                    value: 3
+                }, "3"))), m.a.createElement(k["a"], {
                     orientation: "center"
                 }, "\u552e\u4ef7\u8bbe\u7f6e ", m.a.createElement(c["a"], {
                     placement: "top",
@@ -82908,6 +82932,11 @@
                     title: "\u540d\u79f0",
                     dataIndex: "name",
                     key: "name"
+                }, {
+                    title: "\u5f52\u5c5e\u7ad9\u70b9",
+                    dataIndex: "site_id",
+                    key: "site_id",
+                    render: e=>m.a.createElement(l["a"], null, e || 1)
                 }, {
                     title: "\u7edf\u8ba1",
                     dataIndex: "count",

@@ -37,6 +37,9 @@ class PlanController extends Controller
     {
         $params = $request->validated();
         if ($request->input('id')) {
+            // A plan's site is its ownership boundary.  Do not allow an edit
+            // form to move an existing plan and strand its users/orders.
+            unset($params['site_id']);
             $plan = Plan::withoutGlobalScopes()->find($request->input('id'));
             if (!$plan) {
                 abort(500, '该订阅不存在');
@@ -62,6 +65,9 @@ class PlanController extends Controller
                 'data' => true
             ]);
         }
+        // Keep a fallback for older admin bundles, while the current bundle
+        // always sends the explicitly selected ownership site.
+        $params['site_id'] = (int) ($params['site_id'] ?? $request->attributes->get('site_id', 1));
         if (!Plan::create($params)) {
             abort(500, '创建失败');
         }
