@@ -23,7 +23,13 @@ class ClientController extends Controller
         // account not expired and is not banned.
         $userService = new UserService();
         $userStatusMessage = $this->getUserStatusMessage($user);
-        $clientUpdateMessage = $this->getClientUpdateMessage($userAgent, $flag);
+        // Managed Mihomo clients identify themselves with clash.meta in the
+        // compiled brand UA. They must receive only real service nodes: a
+        // maintenance notice encoded as a fake proxy is indistinguishable from
+        // a selectable node to the client and can break its automatic choice.
+        $clientUpdateMessage = $this->isManagedMihomoClient($userAgent)
+            ? null
+            : $this->getClientUpdateMessage($userAgent, $flag);
         if ($this->isMozilla($userAgent) || $this->isMozilla($flag)) {
             return $this->fakeSubscribe($user, $flag, [$this->getBrowserAccessMessage()]);
         }
@@ -90,6 +96,11 @@ class ClientController extends Controller
     private function isClashForWindows($flag)
     {
         return strpos($flag, 'clashforwindows') !== false;
+    }
+
+    private function isManagedMihomoClient($userAgent)
+    {
+        return strpos($userAgent, 'clash.meta') !== false;
     }
 
     private function isMozilla($flag)
